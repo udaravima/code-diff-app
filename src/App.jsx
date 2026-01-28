@@ -24,7 +24,8 @@ import {
   Maximize2,
   PanelLeftClose,
   PanelLeftOpen,
-  GripVertical
+  GripVertical,
+  Navigation
 } from 'lucide-react';
 
 // --- CONFIG & CONSTANTS ---
@@ -51,15 +52,15 @@ const getFileSlug = (path) => {
 };
 
 /**
- * Basic Word-level diffing for intra-line highlights
- * Compares two strings and returns an array of segments with types.
+ * Enhanced Word-level diffing. 
+ * Correctly identifies which words are added vs removed in a pair.
  */
 const getWordDiff = (oldStr, newStr) => {
-  const oldWords = oldStr.split(/(\s+)/);
-  const newWords = newStr.split(/(\s+)/);
+  // Split by words, keeping punctuation and whitespace as separate tokens
+  const tokenize = (s) => s.split(/(\W+)/).filter(Boolean);
+  const oldWords = tokenize(oldStr);
+  const newWords = tokenize(newStr);
 
-  // This is a simplified version for high-intensity highlighting
-  // In a production tool, one might use a more robust library like 'diff'
   const result = [];
   let i = 0, j = 0;
 
@@ -67,7 +68,7 @@ const getWordDiff = (oldStr, newStr) => {
     if (i < oldWords.length && j < newWords.length && oldWords[i] === newWords[j]) {
       result.push({ value: oldWords[i], type: 'equal' });
       i++; j++;
-    } else if (j < newWords.length && (i >= oldWords.length || !oldWords.slice(i, i + 5).includes(newWords[j]))) {
+    } else if (j < newWords.length && (i >= oldWords.length || !oldWords.slice(i, i + 8).includes(newWords[j]))) {
       result.push({ value: newWords[j], type: 'added' });
       j++;
     } else {
@@ -127,6 +128,34 @@ const chunkifyDiff = (diff) => {
 
 // --- COMPONENTS ---
 
+/**
+ * Mini-map showing changes throughout the file
+ */
+const DiffMiniMap = ({ diff, onJump }) => {
+  if (!diff.length) return null;
+
+  return (
+    <div className="w-4 h-full bg-slate-900/50 border-l border-white/5 flex flex-col shrink-0 select-none cursor-pointer group relative">
+      <div className="absolute inset-0 z-10 opacity-0 group-hover:opacity-100 transition-opacity bg-blue-500/5 pointer-events-none" />
+      {diff.map((line, idx) => {
+        let color = 'transparent';
+        if (line.type === 'added') color = '#10b981'; // emerald-500
+        if (line.type === 'removed') color = '#f43f5e'; // rose-500
+
+        return (
+          <div
+            key={idx}
+            onClick={() => onJump(idx)}
+            className="w-full flex-1 min-h-[1px]"
+            style={{ backgroundColor: color }}
+            title={`Line ${line.oldLine || line.newLine}`}
+          />
+        );
+      })}
+    </div>
+  );
+};
+
 const DiffLine = ({ line }) => {
   const typeStyles = {
     added: 'bg-emerald-500/10 text-emerald-300 border-l-4 border-emerald-500',
@@ -136,21 +165,23 @@ const DiffLine = ({ line }) => {
 
   const prefix = line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' ';
 
-  // If we have a paired line, compute the intra-line diff
   const renderContent = () => {
     if (!line.pairedWith) return line.content;
 
+    // Use paired line to calculate exact token changes
     const oldStr = line.type === 'removed' ? line.content : line.pairedWith.content;
     const newStr = line.type === 'added' ? line.content : line.pairedWith.content;
     const wordDiffs = getWordDiff(oldStr, newStr);
 
     return wordDiffs.map((segment, idx) => {
       if (segment.type === 'equal') return <span key={idx}>{segment.value}</span>;
+
+      // Only highlight if the segment type matches the current line type
       if (segment.type === line.type) {
         return (
           <span
             key={idx}
-            className={line.type === 'added' ? 'bg-emerald-400 text-slate-900 px-0.5 rounded-sm font-bold' : 'bg-rose-400 text-slate-900 px-0.5 rounded-sm font-bold'}
+            className={line.type === 'added' ? 'bg-emerald-500 text-white px-0.5 rounded-sm font-bold shadow-sm' : 'bg-rose-500 text-white px-0.5 rounded-sm font-bold shadow-sm'}
           >
             {segment.value}
           </span>
@@ -277,6 +308,7 @@ const SettingsModal = ({ isOpen, onClose, ignoreList, setIgnoreList }) => {
 };
 
 const ComparisonView = ({ pair, toggleSidebar, isSidebarCollapsed }) => {
+  const scrollContainerRef = useRef(null);
   const diff = useMemo(() => calculateDiff(pair.v1?.content, pair.v2?.content), [pair]);
   const chunks = useMemo(() => chunkifyDiff(diff), [diff]);
 
@@ -292,6 +324,15 @@ const ComparisonView = ({ pair, toggleSidebar, isSidebarCollapsed }) => {
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const jumpToLine = (index) => {
+    if (scrollContainerRef.current) {
+      const container = scrollContainerRef.current;
+      const totalLines = diff.length;
+      const targetScroll = (index / totalLines) * container.scrollHeight;
+      container.scrollTo({ top: targetScroll, behavior: 'smooth' });
+    }
   };
 
   return (
@@ -346,12 +387,16 @@ const ComparisonView = ({ pair, toggleSidebar, isSidebarCollapsed }) => {
         </div>
       </header>
 
-      <div className="flex-1 overflow-auto bg-[#0d1117] custom-scrollbar selection:bg-blue-500/30">
-        <div className="py-4">
-          {chunks.map((chunk, idx) => (
-            <ChunkBlock key={idx} chunk={chunk} />
-          ))}
+      <div className="flex flex-1 overflow-hidden">
+        <div ref={scrollContainerRef} className="flex-1 overflow-auto bg-[#0d1117] custom-scrollbar selection:bg-blue-500/30">
+          <div className="py-4">
+            {chunks.map((chunk, idx) => (
+              <ChunkBlock key={idx} chunk={chunk} />
+            ))}
+          </div>
         </div>
+        {/* Toggable Mini-map on the far right */}
+        <DiffMiniMap diff={diff} onJump={jumpToLine} />
       </div>
     </div>
   );
@@ -625,15 +670,6 @@ export default function App() {
       </aside>
 
       <main className="flex-1 flex flex-col min-w-0 bg-[#0d1117] relative">
-        {isSidebarCollapsed && (
-          <button
-            onClick={() => setIsSidebarCollapsed(false)}
-            className="absolute left-4 top-4 z-50 p-2 bg-slate-900 border border-white/10 rounded-lg text-slate-400 hover:text-white transition-all shadow-xl"
-          >
-            <PanelLeftOpen size={18} />
-          </button>
-        )}
-
         {selectedPair ? (
           <ComparisonView
             pair={selectedPair}
@@ -661,8 +697,8 @@ export default function App() {
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 w-full max-w-3xl">
                 {[
-                  { icon: Eye, color: 'text-blue-400', label: 'Intra-Line', text: 'Granular word-level diffs' },
-                  { icon: Columns, color: 'text-emerald-400', label: 'Matching', text: 'Fuzzy identity Pairing' },
+                  { icon: Navigation, color: 'text-blue-400', label: 'Mini-Map', text: 'Visual heatmap of changes' },
+                  { icon: Eye, color: 'text-emerald-400', label: 'Intra-Line', text: 'Granular word-level diffs' },
                   { icon: ShieldAlert, color: 'text-amber-400', label: 'Policy', text: 'Auto binary filtering' }
                 ].map((item, idx) => (
                   <div key={idx} className="p-6 rounded-3xl border border-white/5 bg-slate-900/40 backdrop-blur-sm flex flex-col items-center text-center group hover:bg-slate-800/60 transition-all">
