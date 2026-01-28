@@ -17,15 +17,18 @@ import {
   Settings,
   X,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  ShieldAlert,
+  Trash2
 } from 'lucide-react';
 
 // --- CONFIG & CONSTANTS ---
 
-const IGNORE_EXTENSIONS = new Set([
+const DEFAULT_IGNORE = [
   'png', 'jpg', 'jpeg', 'gif', 'svg', 'ico', 'pdf', 'zip', 'tar', 'gz',
-  'exe', 'dll', 'so', 'dylib', 'bin', 'woff', 'woff2', 'ttf', 'eot'
-]);
+  'exe', 'dll', 'so', 'dylib', 'bin', 'woff', 'woff2', 'ttf', 'eot',
+  'node_modules', '.git', '.DS_Store', 'dist', 'build'
+];
 
 // --- UTILS ---
 
@@ -42,11 +45,6 @@ const getFileSlug = (path) => {
     .replace(/[._-](legacy|modern|old|new|final|latest)/g, '')
     .replace(/\.[^/.]+$/, "")
     .trim();
-};
-
-const isTextFile = (filename) => {
-  const ext = filename.split('.').pop().toLowerCase();
-  return !IGNORE_EXTENSIONS.has(ext);
 };
 
 /**
@@ -75,7 +73,7 @@ const calculateDiff = (oldText, newText) => {
 
 // --- COMPONENTS ---
 
-const DiffLine = ({ line, viewMode }) => {
+const DiffLine = ({ line }) => {
   const typeStyles = {
     added: 'bg-emerald-500/10 text-emerald-300 border-l-4 border-emerald-500',
     removed: 'bg-rose-500/10 text-rose-300 border-l-4 border-rose-500',
@@ -96,12 +94,84 @@ const DiffLine = ({ line, viewMode }) => {
   );
 };
 
-const ComparisonView = ({ pair, viewMode }) => {
+const SettingsModal = ({ isOpen, onClose, ignoreList, setIgnoreList }) => {
+  const [newTag, setNewTag] = useState('');
+
+  if (!isOpen) return null;
+
+  const addTag = (e) => {
+    e.preventDefault();
+    if (newTag && !ignoreList.includes(newTag)) {
+      setIgnoreList([...ignoreList, newTag.toLowerCase()]);
+      setNewTag('');
+    }
+  };
+
+  const removeTag = (tag) => {
+    setIgnoreList(ignoreList.filter(t => t !== tag));
+  };
+
+  return (
+    <div className="absolute inset-0 bg-black/60 backdrop-blur-md z-[60] flex items-center justify-center p-6">
+      <div className="bg-[#161b22] border border-white/10 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between bg-slate-900/40">
+          <div className="flex items-center gap-2">
+            <ShieldAlert size={18} className="text-amber-500" />
+            <h3 className="font-bold text-white text-sm uppercase tracking-wider">Ingestion Policy</h3>
+          </div>
+          <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="p-6">
+          <p className="text-xs text-slate-400 mb-4 leading-relaxed">
+            Define patterns or extensions to ignore during directory scans. Files matching these strings will be skipped to optimize performance.
+          </p>
+
+          <form onSubmit={addTag} className="flex gap-2 mb-6">
+            <input
+              type="text"
+              placeholder="e.g. node_modules or .log"
+              className="flex-1 bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500 transition-all"
+              value={newTag}
+              onChange={(e) => setNewTag(e.target.value)}
+            />
+            <button className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-xs font-bold transition-colors">
+              Add
+            </button>
+          </form>
+
+          <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto custom-scrollbar p-1">
+            {ignoreList.map(tag => (
+              <span key={tag} className="flex items-center gap-2 bg-slate-800 text-slate-300 px-2 py-1 rounded-md text-[10px] font-mono border border-white/5 group">
+                {tag}
+                <button onClick={() => removeTag(tag)} className="text-slate-500 hover:text-rose-400">
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="px-6 py-4 bg-black/20 border-t border-white/5 text-right">
+          <button
+            onClick={onClose}
+            className="text-xs font-bold text-blue-400 hover:text-blue-300 transition-colors"
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const ComparisonView = ({ pair }) => {
   const diff = useMemo(() => calculateDiff(pair.v1?.content, pair.v2?.content), [pair]);
   const stats = useMemo(() => ({
     added: diff.filter(d => d.type === 'added').length,
     removed: diff.filter(d => d.type === 'removed').length,
-    total: diff.length
   }), [diff]);
 
   const [copied, setCopied] = useState(false);
@@ -132,7 +202,7 @@ const ComparisonView = ({ pair, viewMode }) => {
               {pair.type}
             </span>
             <span className="text-slate-600">•</span>
-            <code className="text-[11px] text-slate-500 italic">resolved_as: {pair.slug}</code>
+            <code className="text-[11px] text-slate-500 italic">slug: {pair.slug}</code>
           </div>
         </div>
 
@@ -155,7 +225,7 @@ const ComparisonView = ({ pair, viewMode }) => {
       <div className="flex-1 overflow-auto bg-[#0d1117] custom-scrollbar">
         <div className="py-4">
           {diff.map((line, idx) => (
-            <DiffLine key={idx} line={line} viewMode={viewMode} />
+            <DiffLine key={idx} line={line} />
           ))}
         </div>
       </div>
@@ -169,7 +239,13 @@ export default function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedPair, setSelectedPair] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [viewMode, setViewMode] = useState('unified');
+  const [ignoreList, setIgnoreList] = useState(DEFAULT_IGNORE);
+  const [showSettings, setShowSettings] = useState(false);
+
+  // Policy Filter logic
+  const shouldIgnore = (path) => {
+    return ignoreList.some(pattern => path.toLowerCase().includes(pattern.toLowerCase()));
+  };
 
   // Directory Reading Engine
   const handleDirectorySelect = async (e, setFiles) => {
@@ -178,7 +254,10 @@ export default function App() {
 
     const fileData = [];
     for (const file of files) {
-      if (!isTextFile(file.name)) continue;
+      const path = file.webkitRelativePath || file.name;
+
+      // Dynamic Policy Check
+      if (shouldIgnore(path)) continue;
 
       const content = await new Promise((resolve) => {
         const reader = new FileReader();
@@ -187,7 +266,7 @@ export default function App() {
       });
 
       fileData.push({
-        path: file.webkitRelativePath || file.name,
+        path,
         content,
         size: file.size,
         ext: file.name.split('.').pop()
@@ -254,7 +333,14 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-screen bg-[#010409] text-slate-300 font-sans antialiased overflow-hidden">
+    <div className="flex h-screen bg-[#010409] text-slate-300 font-sans antialiased overflow-hidden relative">
+      <SettingsModal
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        ignoreList={ignoreList}
+        setIgnoreList={setIgnoreList}
+      />
+
       {/* Sidebar */}
       <aside className="w-80 border-r border-white/10 flex flex-col bg-[#0d1117] z-30 shadow-2xl shrink-0">
         <div className="p-5 border-b border-white/5 bg-slate-900/20">
@@ -265,15 +351,24 @@ export default function App() {
               </div>
               <h1 className="text-xs font-black text-white tracking-widest uppercase">Version Lens</h1>
             </div>
-            {(v1Files.length > 0 || v2Files.length > 0) && (
+            <div className="flex items-center gap-1">
               <button
-                onClick={reset}
-                className="p-1.5 hover:bg-white/5 rounded-md text-slate-500 hover:text-rose-400 transition-colors"
-                title="Reset Workspace"
+                onClick={() => setShowSettings(true)}
+                className="p-1.5 hover:bg-white/5 rounded-md text-slate-500 hover:text-blue-400 transition-colors"
+                title="Ingestion Policy"
               >
-                <RefreshCw size={14} />
+                <Settings size={14} />
               </button>
-            )}
+              {(v1Files.length > 0 || v2Files.length > 0) && (
+                <button
+                  onClick={reset}
+                  className="p-1.5 hover:bg-white/5 rounded-md text-slate-500 hover:text-rose-400 transition-colors"
+                  title="Reset Workspace"
+                >
+                  <RefreshCw size={14} />
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -359,9 +454,11 @@ export default function App() {
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
-            <Settings size={32} className="text-slate-800 mb-4 animate-spin-slow" />
+            <div className="w-16 h-16 bg-slate-800/20 rounded-full flex items-center justify-center mb-4 border border-white/5">
+              <Settings size={24} className="text-slate-700 animate-spin-slow" />
+            </div>
             <p className="text-xs text-slate-600 font-medium leading-relaxed">
-              Folders are matched automatically using fuzzy slug resolution.
+              Matched files will appear here.<br />Check your <b>Policy</b> for ignore rules.
             </p>
           </div>
         )}
@@ -370,7 +467,7 @@ export default function App() {
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0 bg-[#0d1117] relative">
         {selectedPair ? (
-          <ComparisonView pair={selectedPair} viewMode={viewMode} />
+          <ComparisonView pair={selectedPair} />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center p-12">
             <div className="relative mb-10">
@@ -382,24 +479,24 @@ export default function App() {
 
             <h3 className="text-2xl font-black text-white tracking-tight mb-3">Initialize Diff Workspace</h3>
             <p className="text-slate-500 text-sm max-w-sm text-center leading-relaxed">
-              Drop directories or use the sidebar buttons. Binary files like images and executables are automatically skipped to keep comparison data clean.
+              Compare local versions of directories. Use the <b>Settings</b> in the sidebar to define which files to skip during the comparison.
             </p>
 
             <div className="mt-12 grid grid-cols-1 sm:grid-cols-3 gap-6 w-full max-w-2xl">
               <div className="p-5 rounded-2xl border border-white/5 bg-slate-900/50 flex flex-col items-center text-center">
                 <Eye size={20} className="text-blue-400 mb-3" />
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Observation</span>
-                <p className="text-xs text-slate-400">Unified diff visualization</p>
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Observe</span>
+                <p className="text-xs text-slate-400">Unified changeset view</p>
               </div>
               <div className="p-5 rounded-2xl border border-white/5 bg-slate-900/50 flex flex-col items-center text-center">
                 <Columns size={20} className="text-emerald-400 mb-3" />
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Matching</span>
-                <p className="text-xs text-slate-400">Fuzzy filename pairing</p>
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Match</span>
+                <p className="text-xs text-slate-400">Fuzzy identity pairing</p>
               </div>
               <div className="p-5 rounded-2xl border border-white/5 bg-slate-900/50 flex flex-col items-center text-center">
-                <AlertCircle size={20} className="text-amber-400 mb-3" />
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Filtering</span>
-                <p className="text-xs text-slate-400">Auto-binary skipping</p>
+                <ShieldAlert size={20} className="text-amber-400 mb-3" />
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Policy</span>
+                <p className="text-xs text-slate-400">Configurable ignore list</p>
               </div>
             </div>
           </div>
@@ -413,7 +510,7 @@ export default function App() {
             <div className="absolute inset-0 border-4 border-t-blue-500 rounded-full animate-spin" />
           </div>
           <p className="text-white font-black tracking-widest uppercase text-xs">Parsing Filesystems</p>
-          <p className="text-slate-500 text-[10px] mt-2 italic">Scanning for text content...</p>
+          <p className="text-slate-500 text-[10px] mt-2 italic">Applying ignore policies...</p>
         </div>
       )}
     </div>
