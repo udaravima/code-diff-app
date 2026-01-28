@@ -53,7 +53,6 @@ const getFileSlug = (path) => {
 
 /**
  * Word-level diffing logic.
- * Identifies tokens that are added vs removed between two lines.
  */
 const getWordDiff = (oldStr, newStr) => {
   const tokenize = (s) => s.split(/(\W+)/).filter(Boolean);
@@ -97,15 +96,12 @@ const calculateDiff = (oldText, newText) => {
     }
   }
 
-  // SECOND PASS: SYMMETRIC PAIRING
-  // This ensures that either order (+/- or -/+) triggers intra-line diffing
+  // Symmetric pairing for intra-line diffing
   for (let k = 0; k < diff.length - 1; k++) {
     const current = diff[k];
     const next = diff[k + 1];
-
     const isChangePair = (current.type === 'removed' && next.type === 'added') ||
       (current.type === 'added' && next.type === 'removed');
-
     if (isChangePair && !current.pairedWith && !next.pairedWith) {
       current.pairedWith = next;
       next.pairedWith = current;
@@ -144,14 +140,8 @@ const DiffMiniMap = ({ diff, onJump }) => {
         let color = 'transparent';
         if (line.type === 'added') color = '#10b981';
         if (line.type === 'removed') color = '#f43f5e';
-
         return (
-          <div
-            key={idx}
-            onClick={() => onJump(idx)}
-            className="w-full flex-1 min-h-[1px]"
-            style={{ backgroundColor: color }}
-          />
+          <div key={idx} onClick={() => onJump(idx)} className="w-full flex-1 min-h-[1px]" style={{ backgroundColor: color }} />
         );
       })}
     </div>
@@ -168,22 +158,30 @@ const DiffLine = ({ line }) => {
   const renderContent = () => {
     if (!line.pairedWith) return line.content;
 
-    // Use paired line to calculate exact token changes
     const oldStr = line.type === 'removed' ? line.content : line.pairedWith.content;
     const newStr = line.type === 'added' ? line.content : line.pairedWith.content;
-    const wordDiffs = getWordDiff(oldStr, newStr);
+    const rawSegments = getWordDiff(oldStr, newStr);
 
-    return wordDiffs.map((segment, idx) => {
+    // Coalesce adjacent tokens of the same type for contiguous highlighting
+    const coalesced = [];
+    rawSegments.forEach(seg => {
+      const last = coalesced[coalesced.length - 1];
+      if (last && last.type === seg.type) {
+        last.value += seg.value;
+      } else {
+        coalesced.push({ ...seg });
+      }
+    });
+
+    return coalesced.map((segment, idx) => {
       if (segment.type === 'equal') return <span key={idx}>{segment.value}</span>;
-
-      // If segment matches the current line type, apply High-Intensity Highlight
       if (segment.type === line.type) {
         return (
           <span
             key={idx}
             className={line.type === 'added'
-              ? 'bg-emerald-500 text-white px-0.5 rounded-sm font-bold mx-[1px]'
-              : 'bg-rose-500 text-white px-0.5 rounded-sm font-bold mx-[1px]'
+              ? 'bg-emerald-400/30 text-emerald-100 font-bold rounded-sm'
+              : 'bg-rose-400/30 text-rose-100 font-bold rounded-sm'
             }
           >
             {segment.value}
@@ -242,9 +240,7 @@ const ChunkBlock = ({ chunk }) => {
 
 const SettingsModal = ({ isOpen, onClose, ignoreList, setIgnoreList }) => {
   const [newTag, setNewTag] = useState('');
-
   if (!isOpen) return null;
-
   const addTag = (e) => {
     e.preventDefault();
     if (newTag && !ignoreList.includes(newTag)) {
@@ -252,60 +248,28 @@ const SettingsModal = ({ isOpen, onClose, ignoreList, setIgnoreList }) => {
       setNewTag('');
     }
   };
-
   return (
     <div className="absolute inset-0 bg-black/70 backdrop-blur-md z-[60] flex items-center justify-center p-6">
       <div className="bg-[#161b22] border border-white/10 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
         <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between bg-slate-900/40">
-          <div className="flex items-center gap-2">
-            <ShieldAlert size={18} className="text-blue-500" />
-            <h3 className="font-bold text-white text-sm uppercase tracking-wider">Workspace Policy</h3>
-          </div>
-          <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors">
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-2"><ShieldAlert size={18} className="text-blue-500" /><h3 className="font-bold text-white text-sm uppercase tracking-wider">Workspace Policy</h3></div>
+          <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors"><X size={18} /></button>
         </div>
-
         <div className="p-6">
           <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Exclude Patterns</label>
           <form onSubmit={addTag} className="flex gap-2 mb-4">
-            <input
-              type="text"
-              placeholder="e.g. .env, build/, .tmp"
-              className="flex-1 bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500 transition-all text-slate-200"
-              value={newTag}
-              onChange={(e) => setNewTag(e.target.value)}
-            />
-            <button className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-xs font-bold transition-colors">
-              Add
-            </button>
+            <input type="text" placeholder="e.g. .env, build/, .tmp" className="flex-1 bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500 transition-all text-slate-200" value={newTag} onChange={(e) => setNewTag(e.target.value)} />
+            <button className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-xs font-bold transition-colors">Add</button>
           </form>
-
           <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto custom-scrollbar p-1">
             {ignoreList.map(tag => (
-              <span key={tag} className="flex items-center gap-2 bg-slate-800 text-slate-300 px-2 py-1 rounded-md text-[10px] font-mono border border-white/5 group hover:border-rose-500/30 transition-colors">
-                {tag}
-                <button onClick={() => setIgnoreList(ignoreList.filter(t => t !== tag))} className="text-slate-500 hover:text-rose-400">
-                  <X size={12} />
-                </button>
-              </span>
+              <span key={tag} className="flex items-center gap-2 bg-slate-800 text-slate-300 px-2 py-1 rounded-md text-[10px] font-mono border border-white/5 group hover:border-rose-500/30 transition-colors">{tag}<button onClick={() => setIgnoreList(ignoreList.filter(t => t !== tag))} className="text-slate-500 hover:text-rose-400"><X size={12} /></button></span>
             ))}
           </div>
         </div>
-
         <div className="px-6 py-4 bg-black/20 border-t border-white/5 flex justify-between items-center">
-          <button
-            onClick={() => setIgnoreList(DEFAULT_IGNORE)}
-            className="text-[10px] font-bold text-slate-500 hover:text-slate-300 transition-colors"
-          >
-            Reset to Defaults
-          </button>
-          <button
-            onClick={onClose}
-            className="bg-slate-800 hover:bg-slate-700 text-white px-6 py-2 rounded-lg text-xs font-bold transition-all"
-          >
-            Close
-          </button>
+          <button onClick={() => setIgnoreList(DEFAULT_IGNORE)} className="text-[10px] font-bold text-slate-500 hover:text-slate-300 transition-colors">Reset to Defaults</button>
+          <button onClick={onClose} className="bg-slate-800 hover:bg-slate-700 text-white px-6 py-2 rounded-lg text-xs font-bold transition-all">Close</button>
         </div>
       </div>
     </div>
@@ -316,12 +280,7 @@ const ComparisonView = ({ pair, toggleSidebar, isSidebarCollapsed }) => {
   const scrollContainerRef = useRef(null);
   const diff = useMemo(() => calculateDiff(pair.v1?.content, pair.v2?.content), [pair]);
   const chunks = useMemo(() => chunkifyDiff(diff), [diff]);
-
-  const stats = useMemo(() => ({
-    added: diff.filter(d => d.type === 'added').length,
-    removed: diff.filter(d => d.type === 'removed').length,
-  }), [diff]);
-
+  const stats = useMemo(() => ({ added: diff.filter(d => d.type === 'added').length, removed: diff.filter(d => d.type === 'removed').length }), [diff]);
   const [copied, setCopied] = useState(false);
 
   const copyToClipboard = () => {
@@ -344,61 +303,32 @@ const ComparisonView = ({ pair, toggleSidebar, isSidebarCollapsed }) => {
     <div className="flex flex-col h-full bg-[#0d1117] overflow-hidden animate-in fade-in duration-300 relative">
       <header className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-slate-900/40 backdrop-blur-xl shrink-0 z-20">
         <div className="flex items-center gap-4">
-          <button
-            onClick={toggleSidebar}
-            className="p-2 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-colors"
-          >
+          <button onClick={toggleSidebar} className="p-2 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-colors">
             {isSidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
           </button>
           <div className="flex flex-col gap-1 min-w-0">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-blue-500/10 rounded-lg shadow-inner shrink-0">
-                <FileText size={18} className="text-blue-400" />
-              </div>
-              <h2 className="text-slate-100 font-semibold tracking-tight truncate max-w-md">
-                {pair.v2?.path || pair.v1?.path}
-              </h2>
+              <div className="p-2 bg-blue-500/10 rounded-lg shadow-inner shrink-0"><FileText size={18} className="text-blue-400" /></div>
+              <h2 className="text-slate-100 font-semibold tracking-tight truncate max-w-md">{pair.v2?.path || pair.v1?.path}</h2>
             </div>
             <div className="flex items-center gap-2 ml-11">
-              <span className={`text-[9px] px-2 py-0.5 rounded-full uppercase font-black tracking-tighter ${pair.type === 'modified' ? 'bg-blue-500/20 text-blue-400' :
-                  pair.type === 'added' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
-                }`}>
-                {pair.type}
-              </span>
+              <span className={`text-[9px] px-2 py-0.5 rounded-full uppercase font-black tracking-tighter ${pair.type === 'modified' ? 'bg-blue-500/20 text-blue-400' : pair.type === 'added' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>{pair.type}</span>
               <span className="text-slate-700 select-none">•</span>
               <code className="text-[10px] text-slate-500 font-mono">identity: {pair.slug}</code>
             </div>
           </div>
         </div>
-
         <div className="flex items-center gap-3">
           <div className="hidden sm:flex items-center bg-black/40 rounded-full px-3 py-1.5 border border-white/5 space-x-3">
-            <div className="flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" />
-              <span className="text-[11px] font-bold text-emerald-400">+{stats.added}</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.4)]" />
-              <span className="text-[11px] font-bold text-rose-400">-{stats.removed}</span>
-            </div>
+            <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" /><span className="text-[11px] font-bold text-emerald-400">+{stats.added}</span></div>
+            <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.4)]" /><span className="text-[11px] font-bold text-rose-400">-{stats.removed}</span></div>
           </div>
-          <button
-            onClick={copyToClipboard}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-xl border border-white/10 shadow-lg transition-all active:scale-95"
-          >
-            {copied ? <CheckCircle2 size={14} className="text-emerald-400" /> : <Copy size={14} />}
-            <span className="font-medium">{copied ? 'Copied!' : 'Copy Target'}</span>
-          </button>
+          <button onClick={copyToClipboard} className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-xl border border-white/10 shadow-lg transition-all active:scale-95">{copied ? <CheckCircle2 size={14} className="text-emerald-400" /> : <Copy size={14} />}<span className="font-medium">{copied ? 'Copied!' : 'Copy Target'}</span></button>
         </div>
       </header>
-
       <div className="flex flex-1 overflow-hidden">
         <div ref={scrollContainerRef} className="flex-1 overflow-auto bg-[#0d1117] custom-scrollbar selection:bg-blue-500/30">
-          <div className="py-4">
-            {chunks.map((chunk, idx) => (
-              <ChunkBlock key={idx} chunk={chunk} />
-            ))}
-          </div>
+          <div className="py-4">{chunks.map((chunk, idx) => (<ChunkBlock key={idx} chunk={chunk} />))}</div>
         </div>
         <DiffMiniMap diff={diff} onJump={jumpToLine} />
       </div>
@@ -414,7 +344,6 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [ignoreList, setIgnoreList] = useState(DEFAULT_IGNORE);
   const [showSettings, setShowSettings] = useState(false);
-
   const [sidebarWidth, setSidebarWidth] = useState(320);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
@@ -506,47 +435,26 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-[#010409] text-slate-300 font-sans antialiased overflow-hidden relative">
-      <SettingsModal
-        isOpen={showSettings}
-        onClose={() => setShowSettings(false)}
-        ignoreList={ignoreList}
-        setIgnoreList={setIgnoreList}
-      />
-
+      <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} ignoreList={ignoreList} setIgnoreList={setIgnoreList} />
       <aside
         style={{ width: isSidebarCollapsed ? 0 : sidebarWidth }}
         className={`border-r border-white/10 flex flex-col bg-[#0d1117] z-30 shadow-2xl shrink-0 transition-[width] duration-300 ease-in-out relative group/sidebar ${isSidebarCollapsed ? 'overflow-hidden' : ''}`}
       >
         <div className="p-5 border-b border-white/5 bg-slate-900/20 whitespace-nowrap min-w-[320px]">
           <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20">
-                <Code size={18} className="text-white" />
-              </div>
-              <h1 className="text-xs font-black text-white tracking-widest uppercase">Version Lens</h1>
-            </div>
+            <div className="flex items-center gap-3"><div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20"><Code size={18} className="text-white" /></div><h1 className="text-xs font-black text-white tracking-widest uppercase">Version Lens</h1></div>
             <div className="flex items-center gap-1">
               <button onClick={() => setShowSettings(true)} className="p-2 hover:bg-white/5 rounded-lg text-slate-500 hover:text-blue-400 transition-all" title="Workspace Policy"><Settings size={15} /></button>
-              {(v1Files.length > 0 || v2Files.length > 0) && (
-                <button onClick={() => { setV1Files([]); setV2Files([]); setSelectedPair(null); }} className="p-2 hover:bg-white/5 rounded-lg text-slate-500 hover:text-rose-400 transition-all" title="Clear Workspace"><RefreshCw size={15} /></button>
-              )}
+              {(v1Files.length > 0 || v2Files.length > 0) && (<button onClick={() => { setV1Files([]); setV2Files([]); setSelectedPair(null); }} className="p-2 hover:bg-white/5 rounded-lg text-slate-500 hover:text-rose-400 transition-all" title="Clear Workspace"><RefreshCw size={15} /></button>)}
             </div>
           </div>
           <div className="space-y-2">
             <label className="flex items-center gap-3 px-3 py-2.5 bg-[#161b22] border border-white/10 rounded-xl cursor-pointer hover:border-blue-500/50 hover:bg-[#1c2128] transition-all group overflow-hidden">
-              <FolderOpen size={16} className={v1Files.length ? "text-blue-400" : "text-slate-500"} />
-              <div className="flex flex-col min-w-0">
-                <span className="text-[9px] uppercase font-black text-slate-600 tracking-tighter">Base Version</span>
-                <span className="text-xs truncate font-bold text-slate-300">{v1Files.length ? `${v1Files.length} files indexed` : "Select Base Folder"}</span>
-              </div>
+              <FolderOpen size={16} className={v1Files.length ? "text-blue-400" : "text-slate-500"} /><div className="flex flex-col min-w-0"><span className="text-[9px] uppercase font-black text-slate-600 tracking-tighter">Base Version</span><span className="text-xs truncate font-bold text-slate-300">{v1Files.length ? `${v1Files.length} files indexed` : "Select Base Folder"}</span></div>
               <input type="file" webkitdirectory="true" className="hidden" onChange={(e) => handleDirectorySelect(e, setV1Files)} />
             </label>
             <label className="flex items-center gap-3 px-3 py-2.5 bg-[#161b22] border border-white/10 rounded-xl cursor-pointer hover:border-emerald-500/50 hover:bg-[#1c2128] transition-all group overflow-hidden">
-              <FolderOpen size={16} className={v2Files.length ? "text-emerald-400" : "text-slate-500"} />
-              <div className="flex flex-col min-w-0">
-                <span className="text-[9px] uppercase font-black text-slate-600 tracking-tighter">Target Version</span>
-                <span className="text-xs truncate font-bold text-slate-300">{v2Files.length ? `${v2Files.length} files indexed` : "Select New Folder"}</span>
-              </div>
+              <FolderOpen size={16} className={v2Files.length ? "text-emerald-400" : "text-slate-500"} /><div className="flex flex-col min-w-0"><span className="text-[9px] uppercase font-black text-slate-600 tracking-tighter">Target Version</span><span className="text-xs truncate font-bold text-slate-300">{v2Files.length ? `${v2Files.length} files indexed` : "Select New Folder"}</span></div>
               <input type="file" webkitdirectory="true" className="hidden" onChange={(e) => handleDirectorySelect(e, setV2Files)} />
             </label>
           </div>
@@ -554,10 +462,7 @@ export default function App() {
         {matchedPairs.length > 0 ? (
           <div className="min-w-[320px] flex-1 flex flex-col overflow-hidden">
             <div className="px-5 py-4 border-b border-white/5 space-y-4">
-              <div className="relative group">
-                <Search className="absolute left-3 top-2.5 text-slate-500 group-focus-within:text-blue-400 transition-colors" size={14} />
-                <input type="text" placeholder="Jump to file..." className="w-full bg-[#010409] border border-white/10 rounded-lg py-2 pl-9 pr-4 text-xs outline-none focus:border-blue-500/50 transition-all placeholder:text-slate-600 text-slate-200" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-              </div>
+              <div className="relative group"><Search className="absolute left-3 top-2.5 text-slate-500 group-focus-within:text-blue-400 transition-colors" size={14} /><input type="text" placeholder="Jump to file..." className="w-full bg-[#010409] border border-white/10 rounded-lg py-2 pl-9 pr-4 text-xs outline-none focus:border-blue-500/50 transition-all placeholder:text-slate-600 text-slate-200" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
               <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
                 <div className="flex items-center gap-1.5 bg-blue-500/10 text-blue-400 px-2.5 py-1 rounded-full text-[10px] font-black border border-blue-500/10 shrink-0">MOD: {stats.modified}</div>
                 <div className="flex items-center gap-1.5 bg-emerald-500/10 text-emerald-400 px-2.5 py-1 rounded-full text-[10px] font-black border border-emerald-500/10 shrink-0">ADD: {stats.added}</div>
@@ -572,34 +477,25 @@ export default function App() {
                     {pair.type === 'added' && <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" />}
                     {pair.type === 'deleted' && <div className="w-2.5 h-2.5 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.6)]" />}
                   </div>
-                  <div className="flex flex-col min-w-0">
-                    <span className={`text-xs font-bold truncate ${selectedPair === pair ? 'text-blue-300' : 'text-slate-300 group-hover:text-white'}`}>{pair.v2?.path.split('/').pop() || pair.v1?.path.split('/').pop()}</span>
-                    <span className="text-[9px] text-slate-500 truncate mt-0.5 font-mono opacity-60">{pair.slug}</span>
-                  </div>
+                  <div className="flex flex-col min-w-0"><span className={`text-xs font-bold truncate ${selectedPair === pair ? 'text-blue-300' : 'text-slate-300 group-hover:text-white'}`}>{pair.v2?.path.split('/').pop() || pair.v1?.path.split('/').pop()}</span><span className="text-[9px] text-slate-500 truncate mt-0.5 font-mono opacity-60">{pair.slug}</span></div>
                 </button>
               ))}
             </nav>
           </div>
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center opacity-40 min-w-[320px]">
-            <FolderOpen size={24} className="text-slate-600 mb-4" />
-            <p className="text-[11px] text-slate-500 font-bold uppercase tracking-widest leading-relaxed">Workspace Idle</p>
-          </div>
-        )}
+        ) : (<div className="flex-1 flex flex-col items-center justify-center p-8 text-center opacity-40 min-w-[320px]"><FolderOpen size={24} className="text-slate-600 mb-4" /><p className="text-[11px] text-slate-500 font-bold uppercase tracking-widest leading-relaxed">Workspace Idle</p></div>)}
         {!isSidebarCollapsed && <div onMouseDown={startResizing} className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-blue-500/40 transition-colors z-40 flex items-center justify-center group/resizer"><div className="w-[1px] h-10 bg-white/10 group-hover/resizer:bg-blue-500/50" /></div>}
       </aside>
 
       <main className="flex-1 flex flex-col min-w-0 bg-[#0d1117] relative">
-        {isSidebarCollapsed && !selectedPair && (
-          <button onClick={() => setIsSidebarCollapsed(false)} className="absolute left-4 top-4 z-50 p-2 bg-slate-900 border border-white/10 rounded-lg text-slate-400 hover:text-white transition-all shadow-xl">
-            <PanelLeftOpen size={18} />
-          </button>
-        )}
-
         {selectedPair ? (
           <ComparisonView pair={selectedPair} toggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)} isSidebarCollapsed={isSidebarCollapsed} />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center p-12 overflow-hidden">
+            {isSidebarCollapsed && (
+              <button onClick={() => setIsSidebarCollapsed(false)} className="absolute left-4 top-4 z-50 p-2 bg-slate-900 border border-white/10 rounded-lg text-slate-400 hover:text-white transition-all shadow-xl">
+                <PanelLeftOpen size={18} />
+              </button>
+            )}
             <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-20"><div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-blue-600/10 blur-[120px] rounded-full" /></div>
             <div className="relative z-10 text-center">
               <div className="relative inline-block mb-10"><div className="absolute -inset-4 bg-blue-500/20 blur-3xl rounded-full animate-pulse" /><div className="relative w-28 h-28 bg-slate-900 border border-white/10 rounded-[32px] flex items-center justify-center shadow-2xl"><Layout size={48} className="text-blue-500" /></div></div>
@@ -611,11 +507,7 @@ export default function App() {
                   { icon: Eye, color: 'text-emerald-400', label: 'Intra-Line', text: 'Granular word-level diffs' },
                   { icon: ShieldAlert, color: 'text-amber-400', label: 'Policy', text: 'Auto binary filtering' }
                 ].map((item, idx) => (
-                  <div key={idx} className="p-6 rounded-3xl border border-white/5 bg-slate-900/40 backdrop-blur-sm flex flex-col items-center text-center group hover:bg-slate-800/60 transition-all">
-                    <item.icon size={24} className={`${item.color} mb-4 group-hover:scale-110 transition-transform`} />
-                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{item.label}</span>
-                    <p className="text-xs text-slate-400 font-medium">{item.text}</p>
-                  </div>
+                  <div key={idx} className="p-6 rounded-3xl border border-white/5 bg-slate-900/40 backdrop-blur-sm flex flex-col items-center text-center group hover:bg-slate-800/60 transition-all"><item.icon size={24} className={`${item.color} mb-4 group-hover:scale-110 transition-transform`} /><span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{item.label}</span><p className="text-xs text-slate-400 font-medium">{item.text}</p></div>
                 ))}
               </div>
             </div>
@@ -623,13 +515,7 @@ export default function App() {
         )}
       </main>
 
-      {isProcessing && (
-        <div className="absolute inset-0 bg-black/80 backdrop-blur-xl z-[100] flex flex-col items-center justify-center transition-all duration-300">
-          <div className="relative w-20 h-20 mb-8"><div className="absolute inset-0 border-4 border-blue-500/10 rounded-full" /><div className="absolute inset-0 border-4 border-t-blue-500 rounded-full animate-spin shadow-[0_0_15px_rgba(59,130,246,0.5)]" /></div>
-          <p className="text-white font-black tracking-widest uppercase text-xs mb-2">Analyzing File Trees</p>
-          <p className="text-slate-500 text-[10px] font-mono animate-pulse">Running identity resolution & Myers-diff engine...</p>
-        </div>
-      )}
+      {isProcessing && (<div className="absolute inset-0 bg-black/80 backdrop-blur-xl z-[100] flex flex-col items-center justify-center transition-all duration-300"><div className="relative w-20 h-20 mb-8"><div className="absolute inset-0 border-4 border-blue-500/10 rounded-full" /><div className="absolute inset-0 border-4 border-t-blue-500 rounded-full animate-spin shadow-[0_0_15px_rgba(59,130,246,0.5)]" /></div><p className="text-white font-black tracking-widest uppercase text-xs mb-2">Analyzing File Trees</p><p className="text-slate-500 text-[10px] font-mono animate-pulse">Running identity resolution & Myers-diff engine...</p></div>)}
     </div>
   );
 }
