@@ -96,15 +96,36 @@ const calculateDiff = (oldText, newText) => {
     }
   }
 
-  // Symmetric pairing for intra-line diffing
+  // Symmetric pairing for intra-line diffing AND Pre-calculation
   for (let k = 0; k < diff.length - 1; k++) {
     const current = diff[k];
     const next = diff[k + 1];
     const isChangePair = (current.type === 'removed' && next.type === 'added') ||
       (current.type === 'added' && next.type === 'removed');
+
     if (isChangePair && !current.pairedWith && !next.pairedWith) {
       current.pairedWith = next;
       next.pairedWith = current;
+
+      // OPTIMIZATION: Calculate word diffs ONCE here, not during render
+      const oldStr = current.type === 'removed' ? current.content : next.content;
+      const newStr = current.type === 'added' ? current.content : next.content;
+      const rawSegments = getWordDiff(oldStr, newStr);
+
+      // Coalesce adjacent tokens
+      const coalesced = [];
+      rawSegments.forEach(seg => {
+        const last = coalesced[coalesced.length - 1];
+        if (last && last.type === seg.type) {
+          last.value += seg.value;
+        } else {
+          coalesced.push({ ...seg });
+        }
+      });
+
+      // Attach segments to both lines so simple renderers can use them
+      current.segments = coalesced;
+      next.segments = coalesced;
     }
   }
 
@@ -130,7 +151,7 @@ const chunkifyDiff = (diff) => {
 
 // --- COMPONENTS ---
 
-const DiffMiniMap = ({ diff, onJump }) => {
+const DiffMiniMap = React.memo(({ diff, onJump }) => {
   if (!diff.length) return null;
 
   return (
@@ -146,9 +167,10 @@ const DiffMiniMap = ({ diff, onJump }) => {
       })}
     </div>
   );
-};
+});
 
-const DiffLine = ({ line }) => {
+// Memoized to prevent re-renders when sidebar resizes
+const DiffLine = React.memo(({ line }) => {
   const typeStyles = {
     added: 'bg-emerald-500/10 text-emerald-300 border-l-4 border-emerald-500',
     removed: 'bg-rose-500/10 text-rose-300 border-l-4 border-rose-500',
@@ -156,40 +178,30 @@ const DiffLine = ({ line }) => {
   };
 
   const renderContent = () => {
-    if (!line.pairedWith) return line.content;
+    // Optimization: Use pre-calculated segments if available
+    if (line.segments) {
+      return line.segments.map((segment, idx) => {
+        if (segment.type === 'equal') return <span key={idx}>{segment.value}</span>;
 
-    const oldStr = line.type === 'removed' ? line.content : line.pairedWith.content;
-    const newStr = line.type === 'added' ? line.content : line.pairedWith.content;
-    const rawSegments = getWordDiff(oldStr, newStr);
+        // Only highlight if segment type matches line type (added on added line, removed on removed line)
+        if (segment.type === line.type) {
+          return (
+            <span
+              key={idx}
+              className={line.type === 'added'
+                ? 'bg-emerald-400/30 text-emerald-100 font-bold rounded-sm'
+                : 'bg-rose-400/30 text-rose-100 font-bold rounded-sm'
+              }
+            >
+              {segment.value}
+            </span>
+          );
+        }
+        return null;
+      });
+    }
 
-    // Coalesce adjacent tokens of the same type for contiguous highlighting
-    const coalesced = [];
-    rawSegments.forEach(seg => {
-      const last = coalesced[coalesced.length - 1];
-      if (last && last.type === seg.type) {
-        last.value += seg.value;
-      } else {
-        coalesced.push({ ...seg });
-      }
-    });
-
-    return coalesced.map((segment, idx) => {
-      if (segment.type === 'equal') return <span key={idx}>{segment.value}</span>;
-      if (segment.type === line.type) {
-        return (
-          <span
-            key={idx}
-            className={line.type === 'added'
-              ? 'bg-emerald-400/30 text-emerald-100 font-bold rounded-sm'
-              : 'bg-rose-400/30 text-rose-100 font-bold rounded-sm'
-            }
-          >
-            {segment.value}
-          </span>
-        );
-      }
-      return null;
-    });
+    return line.content;
   };
 
   const prefix = line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' ';
@@ -204,9 +216,11 @@ const DiffLine = ({ line }) => {
       </div>
     </div>
   );
-};
+});
+DiffLine.displayName = 'DiffLine';
 
-const ChunkBlock = ({ chunk }) => {
+// Memoized ChunkBlock
+const ChunkBlock = React.memo(({ chunk }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const isUnchanged = chunk.type === 'unchanged';
   const shouldFold = isUnchanged && chunk.lines.length > (CONTEXT_LINES * 2 + 2);
@@ -236,7 +250,8 @@ const ChunkBlock = ({ chunk }) => {
       {endLines.map((line, idx) => <DiffLine key={`end-${idx}`} line={line} />)}
     </>
   );
-};
+});
+ChunkBlock.displayName = 'ChunkBlock';
 
 const SettingsModal = ({ isOpen, onClose, ignoreList, setIgnoreList }) => {
   const [newTag, setNewTag] = useState('');
@@ -290,14 +305,14 @@ const ComparisonView = ({ pair, toggleSidebar, isSidebarCollapsed }) => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const jumpToLine = (index) => {
+  const jumpToLine = useCallback((index) => {
     if (scrollContainerRef.current) {
       const container = scrollContainerRef.current;
       const totalLines = diff.length;
       const targetScroll = (index / totalLines) * container.scrollHeight;
       container.scrollTo({ top: targetScroll, behavior: 'smooth' });
     }
-  };
+  }, [diff.length]);
 
   return (
     <div className="flex flex-col h-full bg-[#0d1117] overflow-hidden animate-in fade-in duration-300 relative">
