@@ -1,39 +1,3 @@
-// import { useState } from 'react'
-// import reactLogo from './assets/react.svg'
-// import viteLogo from '/vite.svg'
-// import './App.css'
-
-// function App() {
-//   const [count, setCount] = useState(0)
-
-//   return (
-//     <>
-//       <div>
-//         <a href="https://vite.dev" target="_blank">
-//           <img src={viteLogo} className="logo" alt="Vite logo" />
-//         </a>
-//         <a href="https://react.dev" target="_blank">
-//           <img src={reactLogo} className="logo react" alt="React logo" />
-//         </a>
-//       </div>
-//       <h1>Vite + React</h1>
-//       <div className="card">
-//         <button onClick={() => setCount((count) => count + 2)}>
-//           count is {count}
-//         </button> <br />
-//         <p>
-//           Edit <code>src/App.jsx</code> and save to test HMR
-//         </p>
-//       </div >
-//       <p className="read-the-docs">
-//         Click on the Vite and React logos to learn more
-//       </p>
-//     </>
-//   )
-// }
-
-// export default App
-
 import React, { useState, useMemo, useEffect } from 'react';
 import {
   FileText,
@@ -49,39 +13,10 @@ import {
   Activity,
   Code,
   Copy,
-  Check
+  Upload,
+  RefreshCw,
+  FolderOpen
 } from 'lucide-react';
-
-/**
- * MOCK DATA: Simulating real-world versioning chaos
- */
-const MOCK_PROJECTS = [
-  {
-    id: 'compare_01',
-    name: 'Auth-System-Core',
-    v1: [
-      { path: 'src/auth/login_v1.js', content: 'function auth(u, p) {\n  return db.query("SELECT * FROM users");\n}\n\nexport default auth;' },
-      { path: 'src/utils/logger-legacy.js', content: 'export const log = (m) => console.log(`[LOG]: ${m}`);' },
-      { path: 'package.json', content: '{\n  "name": "auth-core",\n  "version": "1.0.0"\n}' }
-    ],
-    v2: [
-      { path: 'src/auth/login_v1.2.js', content: 'async function auth(u, p) {\n  // Added async support and security hashing\n  const hash = await crypto.hash(p);\n  return db.execute("SELECT * FROM users WHERE creds = ?", [u, hash]);\n}\n\nexport default auth;' },
-      { path: 'src/utils/logger-modern.js', content: 'export const log = (m) => console.log(`[MODERN-LOG]: ${m}`);\nexport const error = (m) => console.error(m);' },
-      { path: 'package.json', content: '{\n  "name": "auth-core",\n  "version": "1.2.0",\n  "dependencies": { "crypto": "latest" }\n}' },
-      { path: 'README.md', content: '# Auth Core\nUpdated to use crypto hashing.' }
-    ]
-  },
-  {
-    id: 'compare_02',
-    name: 'UI-Library-Alpha',
-    v1: [
-      { path: 'components/Button-v1.tsx', content: 'export const Button = () => <button>Click</button>' }
-    ],
-    v2: [
-      { path: 'components/Button-v2-final.tsx', content: 'export const Button = ({ variant }) => (\n  <button className={variant === "primary" ? "bg-blue" : "bg-gray"}>\n    Click\n  </button>\n)' }
-    ]
-  }
-];
 
 // --- UTILS ---
 
@@ -93,10 +28,10 @@ const getFileSlug = (filename) => {
   return filename
     .toLowerCase()
     .split('/')
-    .pop() // Get just the filename
-    .replace(/[._-]v?\d+(\.\d+)*/g, '') // Remove v1.0, -v2
-    .replace(/[._-](legacy|modern|old|new|final|latest)/g, '') // Remove stage markers
-    .replace(/\.[^/.]+$/, "") // Remove extension
+    .pop()
+    .replace(/[._-]v?\d+(\.\d+)*/g, '')
+    .replace(/[._-](legacy|modern|old|new|final|latest)/g, '')
+    .replace(/\.[^/.]+$/, "")
     .trim();
 };
 
@@ -168,7 +103,7 @@ const ComparisonView = ({ pair }) => {
             </h2>
           </div>
           <p className="text-[11px] text-slate-500 mt-1 ml-11">
-            ID: <code className="text-blue-400/80">{pair.slug}</code>
+            Resolved ID: <code className="text-blue-400/80">{pair.slug}</code>
           </p>
         </div>
 
@@ -178,9 +113,6 @@ const ComparisonView = ({ pair }) => {
             <span className="text-slate-600">/</span>
             <span className="text-rose-400">-{stats.removed}</span>
           </div>
-          <button className="p-2 hover:bg-white/5 rounded-md transition-colors text-slate-400">
-            <Copy size={16} />
-          </button>
         </div>
       </header>
 
@@ -196,22 +128,50 @@ const ComparisonView = ({ pair }) => {
 };
 
 export default function App() {
-  const [activeProject, setActiveProject] = useState(MOCK_PROJECTS[0]);
+  const [v1Files, setV1Files] = useState([]);
+  const [v2Files, setV2Files] = useState([]);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [selectedPair, setSelectedPair] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
 
+  // Handle Directory Input
+  const handleDirectorySelect = async (e, setFiles) => {
+    const files = Array.from(e.target.files);
+    setIsProcessing(true);
+
+    const fileData = await Promise.all(files.map(file => {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          resolve({
+            path: file.webkitRelativePath || file.name,
+            content: event.target.result,
+            size: file.size
+          });
+        };
+        reader.readAsText(file);
+      });
+    }));
+
+    setFiles(fileData);
+    setIsProcessing(false);
+  };
+
+  // The Core Matching Engine (Logic remains robust but acts on live state)
   const matchedPairs = useMemo(() => {
+    if (v1Files.length === 0 && v2Files.length === 0) return [];
+
     const pairs = [];
     const v1Map = new Map();
     const v2Map = new Map();
 
-    activeProject.v1.forEach(f => {
+    v1Files.forEach(f => {
       const slug = getFileSlug(f.path);
       if (!v1Map.has(slug)) v1Map.set(slug, []);
       v1Map.get(slug).push(f);
     });
 
-    activeProject.v2.forEach(f => {
+    v2Files.forEach(f => {
       const slug = getFileSlug(f.path);
       if (!v2Map.has(slug)) v2Map.set(slug, []);
       v2Map.get(slug).push(f);
@@ -220,123 +180,180 @@ export default function App() {
     const allSlugs = new Set([...v1Map.keys(), ...v2Map.keys()]);
 
     allSlugs.forEach(slug => {
-      const v1Files = v1Map.get(slug) || [];
-      const v2Files = v2Map.get(slug) || [];
+      const v1Matches = v1Map.get(slug) || [];
+      const v2Matches = v2Map.get(slug) || [];
 
-      if (v1Files.length > 0 && v2Files.length > 0) {
-        pairs.push({ type: 'modified', slug, v1: v1Files[0], v2: v2Files[0] });
-      } else if (v1Files.length > 0) {
-        pairs.push({ type: 'deleted', slug, v1: v1Files[0], v2: null });
+      if (v1Matches.length > 0 && v2Matches.length > 0) {
+        pairs.push({ type: 'modified', slug, v1: v1Matches[0], v2: v2Matches[0] });
+      } else if (v1Matches.length > 0) {
+        pairs.push({ type: 'deleted', slug, v1: v1Matches[0], v2: null });
       } else {
-        pairs.push({ type: 'added', slug, v1: null, v2: v2Files[0] });
+        pairs.push({ type: 'added', slug, v1: null, v2: v2Matches[0] });
       }
     });
 
-    return pairs;
-  }, [activeProject]);
+    return pairs.sort((a, b) => a.slug.localeCompare(b.slug));
+  }, [v1Files, v2Files]);
 
   useEffect(() => {
-    if (matchedPairs.length > 0) {
+    if (matchedPairs.length > 0 && !selectedPair) {
       setSelectedPair(matchedPairs[0]);
     }
   }, [matchedPairs]);
+
+  const reset = () => {
+    setV1Files([]);
+    setV2Files([]);
+    setSelectedPair(null);
+  };
 
   return (
     <div className="flex h-screen bg-[#010409] text-slate-300 font-sans antialiased overflow-hidden">
       {/* Sidebar */}
       <aside className="w-80 border-r border-white/10 flex flex-col bg-[#0d1117] z-10 shadow-2xl">
         <div className="p-5 border-b border-white/5">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-500/20">
-              <Code size={18} className="text-white" />
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-500/20">
+                <Code size={18} className="text-white" />
+              </div>
+              <h1 className="text-sm font-bold text-white tracking-widest uppercase">Version Lens</h1>
             </div>
-            <h1 className="text-sm font-bold text-white tracking-widest uppercase">Version Lens</h1>
-          </div>
-
-          <label className="text-[10px] font-bold text-slate-500 mb-2 block tracking-wider uppercase">Active Project</label>
-          <div className="relative">
-            <select
-              className="w-full bg-[#161b22] border border-white/10 rounded-lg p-2.5 text-xs text-slate-200 outline-none focus:ring-2 focus:ring-blue-500/40 transition-all appearance-none cursor-pointer"
-              onChange={(e) => setActiveProject(MOCK_PROJECTS.find(x => x.id === e.target.value))}
-            >
-              {MOCK_PROJECTS.map(p => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-            <ChevronDown size={14} className="absolute right-3 top-3 pointer-events-none text-slate-500" />
-          </div>
-        </div>
-
-        <div className="px-5 py-4">
-          <div className="relative group">
-            <Search className="absolute left-3 top-3 text-slate-500 group-focus-within:text-blue-400 transition-colors" size={14} />
-            <input
-              type="text"
-              placeholder="Filter by name or slug..."
-              className="w-full bg-[#010409] border border-white/10 rounded-lg py-2.5 pl-9 pr-4 text-xs outline-none focus:border-blue-500/50 transition-all placeholder:text-slate-600"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-        </div>
-
-        <nav className="flex-1 overflow-auto px-2 space-y-1 custom-scrollbar">
-          <div className="px-3 mb-2 text-[10px] font-bold text-slate-600 uppercase tracking-[0.2em]">Changeset</div>
-          {matchedPairs
-            .filter(p => p.slug.includes(searchTerm.toLowerCase()) || (p.v2?.path || '').toLowerCase().includes(searchTerm.toLowerCase()))
-            .map((pair, idx) => (
-              <button
-                key={idx}
-                onClick={() => setSelectedPair(pair)}
-                className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg text-left transition-all group ${selectedPair === pair
-                    ? 'bg-blue-600/10 text-blue-400 shadow-inner'
-                    : 'hover:bg-white/5'
-                  }`}
-              >
-                <div className="flex-shrink-0">
-                  {pair.type === 'modified' && <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" />}
-                  {pair.type === 'added' && <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />}
-                  {pair.type === 'deleted' && <div className="w-2 h-2 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]" />}
-                </div>
-                <div className="flex flex-col min-w-0">
-                  <span className={`text-xs font-semibold truncate ${selectedPair === pair ? 'text-blue-300' : 'text-slate-300 group-hover:text-white'}`}>
-                    {pair.v2?.path || pair.v1?.path}
-                  </span>
-                  <span className="text-[10px] text-slate-500 truncate mt-0.5 font-mono">
-                    {pair.slug}
-                  </span>
-                </div>
+            {(v1Files.length > 0 || v2Files.length > 0) && (
+              <button onClick={reset} className="text-slate-500 hover:text-white transition-colors">
+                <RefreshCw size={14} />
               </button>
-            ))}
-        </nav>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <div className="group relative">
+              <label className="flex items-center gap-2 px-3 py-2 bg-[#161b22] border border-white/10 rounded-lg cursor-pointer hover:border-blue-500/50 transition-all">
+                <FolderOpen size={14} className={v1Files.length ? "text-emerald-400" : "text-slate-500"} />
+                <span className="text-xs truncate font-medium">
+                  {v1Files.length ? `${v1Files.length} files in V1` : "Select V1 Folder"}
+                </span>
+                <input
+                  type="file"
+                  webkitdirectory="true"
+                  directory="true"
+                  className="hidden"
+                  onChange={(e) => handleDirectorySelect(e, setV1Files)}
+                />
+              </label>
+            </div>
+
+            <div className="group relative">
+              <label className="flex items-center gap-2 px-3 py-2 bg-[#161b22] border border-white/10 rounded-lg cursor-pointer hover:border-blue-500/50 transition-all">
+                <FolderOpen size={14} className={v2Files.length ? "text-emerald-400" : "text-slate-500"} />
+                <span className="text-xs truncate font-medium">
+                  {v2Files.length ? `${v2Files.length} files in V2` : "Select V2 Folder"}
+                </span>
+                <input
+                  type="file"
+                  webkitdirectory="true"
+                  directory="true"
+                  className="hidden"
+                  onChange={(e) => handleDirectorySelect(e, setV2Files)}
+                />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        {matchedPairs.length > 0 && (
+          <>
+            <div className="px-5 py-4 border-b border-white/5">
+              <div className="relative group">
+                <Search className="absolute left-3 top-3 text-slate-500 group-focus-within:text-blue-400 transition-colors" size={14} />
+                <input
+                  type="text"
+                  placeholder="Filter results..."
+                  className="w-full bg-[#010409] border border-white/10 rounded-lg py-2.5 pl-9 pr-4 text-xs outline-none focus:border-blue-500/50 transition-all"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <nav className="flex-1 overflow-auto px-2 space-y-1 py-2 custom-scrollbar">
+              {matchedPairs
+                .filter(p => p.slug.includes(searchTerm.toLowerCase()))
+                .map((pair, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => setSelectedPair(pair)}
+                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg text-left transition-all group ${selectedPair === pair
+                        ? 'bg-blue-600/10 text-blue-400 shadow-inner'
+                        : 'hover:bg-white/5'
+                      }`}
+                  >
+                    <div className="flex-shrink-0">
+                      {pair.type === 'modified' && <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" />}
+                      {pair.type === 'added' && <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />}
+                      {pair.type === 'deleted' && <div className="w-2 h-2 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]" />}
+                    </div>
+                    <div className="flex flex-col min-w-0">
+                      <span className={`text-xs font-semibold truncate ${selectedPair === pair ? 'text-blue-300' : 'text-slate-300 group-hover:text-white'}`}>
+                        {pair.v2?.path || pair.v1?.path}
+                      </span>
+                      <span className="text-[10px] text-slate-500 truncate mt-0.5 font-mono">
+                        {pair.slug}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+            </nav>
+          </>
+        )}
 
         <div className="p-4 bg-black/20 border-t border-white/5">
           <div className="flex items-center gap-3 text-[10px] text-slate-500">
             <div className="flex -space-x-1">
-              <div className="w-4 h-4 rounded-full bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-[8px]">V1</div>
-              <div className="w-4 h-4 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-[8px]">V2</div>
+              <div className={`w-4 h-4 rounded-full border border-white/10 flex items-center justify-center text-[8px] ${v1Files.length ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800'}`}>A</div>
+              <div className={`w-4 h-4 rounded-full border border-white/10 flex items-center justify-center text-[8px] ${v2Files.length ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800'}`}>B</div>
             </div>
-            <span>Smart Resolution Enabled</span>
+            <span>{matchedPairs.length} matches found</span>
           </div>
         </div>
       </aside>
 
-      {/* Main Diff Content */}
-      <main className="flex-1 flex flex-col min-w-0">
+      {/* Main Content */}
+      <main className="flex-1 flex flex-col min-w-0 bg-[#0d1117]">
         {selectedPair ? (
           <ComparisonView pair={selectedPair} />
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center bg-[#0d1117]">
-            <div className="w-20 h-20 bg-slate-800/50 rounded-full flex items-center justify-center mb-6">
-              <Diff size={32} className="text-slate-600" />
+          <div className="flex-1 flex flex-col items-center justify-center">
+            <div className="w-24 h-24 bg-slate-800/30 rounded-full flex items-center justify-center mb-8 border border-white/5">
+              <Upload size={32} className="text-slate-600 animate-pulse" />
             </div>
-            <h3 className="text-white font-medium">No File Selected</h3>
-            <p className="text-slate-500 text-sm mt-2 max-w-xs text-center">
-              Choose a file from the sidebar to inspect version differences and logic changes.
+            <h3 className="text-xl font-bold text-white tracking-tight">Ready for Comparison</h3>
+            <p className="text-slate-500 text-sm mt-3 max-w-sm text-center leading-relaxed px-6">
+              Upload two versions of your project directories. Files will be automatically matched based on their core identity, even if renamed or versioned.
             </p>
+
+            {!v1Files.length && !v2Files.length && (
+              <div className="mt-8 grid grid-cols-2 gap-4">
+                <div className="p-4 rounded-xl border border-white/5 bg-[#161b22] text-center">
+                  <p className="text-[10px] font-bold text-slate-500 uppercase mb-2">Algorithm</p>
+                  <p className="text-xs text-slate-400">Myers-inspired diffing</p>
+                </div>
+                <div className="p-4 rounded-xl border border-white/5 bg-[#161b22] text-center">
+                  <p className="text-[10px] font-bold text-slate-500 uppercase mb-2">Resolution</p>
+                  <p className="text-xs text-slate-400">Fuzzy filename slugs</p>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>
+
+      {isProcessing && (
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex flex-col items-center justify-center">
+          <RefreshCw size={40} className="text-blue-500 animate-spin mb-4" />
+          <p className="text-white font-medium">Indexing Files...</p>
+        </div>
+      )}
     </div>
   );
 }
