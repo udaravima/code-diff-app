@@ -1,30 +1,20 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import {
   FileText,
-  Diff,
-  ArrowRightLeft,
-  Plus,
-  Minus,
   Search,
   Code,
   Copy,
-  Upload,
   RefreshCw,
   FolderOpen,
   Layout,
-  Columns,
   Eye,
   Settings,
   X,
   CheckCircle2,
-  AlertCircle,
   ShieldAlert,
-  ChevronDown,
-  ChevronUp,
   Maximize2,
   PanelLeftClose,
   PanelLeftOpen,
-  GripVertical,
   Navigation
 } from 'lucide-react';
 
