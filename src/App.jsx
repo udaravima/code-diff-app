@@ -28,6 +28,45 @@ const DEFAULT_IGNORE = [
 
 const CONTEXT_LINES = 3;
 
+const STORAGE_KEYS = {
+  V1_FILES: 'versionLens_v1Files',
+  V2_FILES: 'versionLens_v2Files',
+  IGNORE_LIST: 'versionLens_ignoreList',
+  SIDEBAR_WIDTH: 'versionLens_sidebarWidth',
+  SIDEBAR_COLLAPSED: 'versionLens_sidebarCollapsed',
+  SELECTED_SLUG: 'versionLens_selectedSlug',
+};
+
+// --- STORAGE HELPERS ---
+
+const saveToStorage = (key, value) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {
+    console.warn('Failed to save to localStorage:', e);
+  }
+};
+
+const loadFromStorage = (key, defaultValue) => {
+  try {
+    const stored = localStorage.getItem(key);
+    return stored ? JSON.parse(stored) : defaultValue;
+  } catch (e) {
+    console.warn('Failed to load from localStorage:', e);
+    return defaultValue;
+  }
+};
+
+const clearAllStorage = () => {
+  Object.values(STORAGE_KEYS).forEach(key => {
+    try {
+      localStorage.removeItem(key);
+    } catch (e) {
+      console.warn('Failed to clear localStorage:', e);
+    }
+  });
+};
+
 // --- UTILS ---
 
 const getFileSlug = (path) => {
@@ -407,16 +446,44 @@ const ComparisonView = ({ pair, toggleSidebar, isSidebarCollapsed }) => {
 };
 
 export default function App() {
-  const [v1Files, setV1Files] = useState([]);
-  const [v2Files, setV2Files] = useState([]);
+  // Initialize state from localStorage
+  const [v1Files, setV1Files] = useState(() => loadFromStorage(STORAGE_KEYS.V1_FILES, []));
+  const [v2Files, setV2Files] = useState(() => loadFromStorage(STORAGE_KEYS.V2_FILES, []));
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedPair, setSelectedPair] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [ignoreList, setIgnoreList] = useState(DEFAULT_IGNORE);
+  const [ignoreList, setIgnoreList] = useState(() => loadFromStorage(STORAGE_KEYS.IGNORE_LIST, DEFAULT_IGNORE));
   const [showSettings, setShowSettings] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(320);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(() => loadFromStorage(STORAGE_KEYS.SIDEBAR_WIDTH, 320));
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => loadFromStorage(STORAGE_KEYS.SIDEBAR_COLLAPSED, false));
   const [isResizing, setIsResizing] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  // Persist state changes to localStorage
+  useEffect(() => {
+    if (isHydrated) saveToStorage(STORAGE_KEYS.V1_FILES, v1Files);
+  }, [v1Files, isHydrated]);
+
+  useEffect(() => {
+    if (isHydrated) saveToStorage(STORAGE_KEYS.V2_FILES, v2Files);
+  }, [v2Files, isHydrated]);
+
+  useEffect(() => {
+    if (isHydrated) saveToStorage(STORAGE_KEYS.IGNORE_LIST, ignoreList);
+  }, [ignoreList, isHydrated]);
+
+  useEffect(() => {
+    if (isHydrated) saveToStorage(STORAGE_KEYS.SIDEBAR_WIDTH, sidebarWidth);
+  }, [sidebarWidth, isHydrated]);
+
+  useEffect(() => {
+    if (isHydrated) saveToStorage(STORAGE_KEYS.SIDEBAR_COLLAPSED, isSidebarCollapsed);
+  }, [isSidebarCollapsed, isHydrated]);
+
+  // Mark as hydrated after initial mount
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   const startResizing = useCallback(() => setIsResizing(true), []);
   const stopResizing = useCallback(() => setIsResizing(false), []);
@@ -492,9 +559,23 @@ export default function App() {
     }).sort((a, b) => a.slug.localeCompare(b.slug));
   }, [v1Files, v2Files]);
 
+  // Restore selected pair from storage, or default to first pair
   useEffect(() => {
-    if (matchedPairs.length > 0 && !selectedPair) setSelectedPair(matchedPairs[0]);
+    if (matchedPairs.length > 0 && !selectedPair) {
+      const savedSlug = loadFromStorage(STORAGE_KEYS.SELECTED_SLUG, null);
+      const restoredPair = savedSlug
+        ? matchedPairs.find(p => p.slug === savedSlug)
+        : null;
+      setSelectedPair(restoredPair || matchedPairs[0]);
+    }
   }, [matchedPairs, selectedPair]);
+
+  // Persist selected pair slug
+  useEffect(() => {
+    if (isHydrated && selectedPair) {
+      saveToStorage(STORAGE_KEYS.SELECTED_SLUG, selectedPair.slug);
+    }
+  }, [selectedPair, isHydrated]);
 
   const stats = matchedPairs.reduce((acc, p) => {
     acc[p.type] = (acc[p.type] || 0) + 1;
@@ -513,7 +594,7 @@ export default function App() {
             <div className="flex items-center gap-3"><div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20"><Code size={18} className="text-white" /></div><h1 className="text-xs font-black text-white tracking-widest uppercase">Version Lens</h1></div>
             <div className="flex items-center gap-1">
               <button onClick={() => setShowSettings(true)} className="p-2 hover:bg-white/5 rounded-lg text-slate-500 hover:text-blue-400 transition-all" title="Workspace Policy"><Settings size={15} /></button>
-              {(v1Files.length > 0 || v2Files.length > 0) && (<button onClick={() => { setV1Files([]); setV2Files([]); setSelectedPair(null); }} className="p-2 hover:bg-white/5 rounded-lg text-slate-500 hover:text-rose-400 transition-all" title="Clear Workspace"><RefreshCw size={15} /></button>)}
+              {(v1Files.length > 0 || v2Files.length > 0) && (<button onClick={() => { clearAllStorage(); setV1Files([]); setV2Files([]); setSelectedPair(null); }} className="p-2 hover:bg-white/5 rounded-lg text-slate-500 hover:text-rose-400 transition-all" title="Clear Workspace"><RefreshCw size={15} /></button>)}
             </div>
           </div>
           <div className="space-y-2">
