@@ -1,16 +1,97 @@
-# React + Vite
+# CodeDiff App (Version Lens)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A modern, high-performance web application for comparing files matches across two directories. Built with React and Vite, it offers an intuitive interface for visualizing code changes with support for intra-line highlighting, smart folding, and directory comparisons.
 
-Currently, two official plugins are available:
+## ✨ Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **Directory Comparison**: Easily select "Base" and "Target" directories to compare entire project structures.
+- **Smart File Matching**: Automatically matches files between directories based on fuzzy identity (slugs), handling moved or slightly renamed files.
+- **Advanced Diff Engine**:
+  - **Line-by-Line Diff**: Standard unified diff view.
+  - **Intra-Line Highlighting**: Granular word-level diffs to pinpoint exact changes within a line.
+  - **Smart Folding**: Automatically collapses large blocks of unchanged code to focus on what matters.
+- **Visual Navigation**:
+  - **Mini-Map**: Interactive heatmap sidebar to quickly jump to changes (Added/Removed/Modified).
+  - **File Statistics**: Quick summary of Added, Removed, and Modified files.
+- **Workspace Policy**: Customizable ignore patterns (e.g., `node_modules`, `.git`, images) to keep the comparison clean.
+- **Modern UI**:
+  - Sleek Dark Mode design.
+  - Resizable sidebar.
+  - Responsive and fluid animations.
+  - One-click copy to clipboard.
 
-## React Compiler
+## 🛠️ Tech Stack
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- **Framework**: [React 19](https://react.dev/)
+- **Build Tool**: [Vite](https://vitejs.dev/)
+- **Styling**: [Tailwind CSS 4](https://tailwindcss.com/)
+- **Icons**: [Lucide React](https://lucide.dev/)
+- **Linting**: ESLint
 
-## Expanding the ESLint configuration
+## 🚀 Getting Started
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+### Prerequisites
+
+- Node.js (Latest LTS recommended)
+- npm or yarn
+
+### Installation
+
+1. Clone the repository:
+   ```bash
+   git clone <repository-url>
+   cd code-diff-app
+   ```
+
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+### Running Locally
+
+Start the development server:
+
+```bash
+npm run dev
+```
+
+Open your browser and navigate to the URL shown in the terminal (usually `http://localhost:5173`).
+
+### Building for Production
+
+To create a production-ready build:
+
+```bash
+npm run build
+```
+
+To preview the production build locally:
+
+```bash
+npm run preview
+```
+
+## 📖 Usage
+
+1. **Select Directories**:
+   - Click **Select Base Folder** to choose the original version of your code.
+   - Click **Select New Folder** to choose the modified version.
+2. **Navigate Files**:
+   - The sidebar lists all matched files.
+   - Files are color-coded: **Blue** (Modified), **Green** (Added), **Red** (Deleted).
+   - Use the search bar to filter files by name.
+3. **Analyze Diffs**:
+   - Click on a file to view the comparison.
+   - Use the **Mini-Map** on the right to jump to different sections of the file.
+   - Expand collapsed "Unchanged Lines" blocks if you need more context.
+4. **Settings**:
+   - Click the **Gear Icon** to manage excluded file patterns (e.g., ignore specific extensions or folders).
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## 📄 License
+
+[MIT](LICENSE)
