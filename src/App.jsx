@@ -103,20 +103,58 @@ const calculateDiff = (oldText, newText) => {
     }
   }
 
-  // Backtrack to build diff - output removed/added pairs adjacently
-  const diff = [];
+  // Backtrack to collect operations, then interleave properly
+  const ops = [];
   let i = m, j = n;
 
   while (i > 0 || j > 0) {
     if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
-      diff.unshift({ type: 'unchanged', oldLine: i, newLine: j, content: oldLines[i - 1] });
+      ops.unshift({ type: 'unchanged', oldIdx: i, newIdx: j, content: oldLines[i - 1] });
       i--; j--;
     } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      diff.unshift({ type: 'added', oldLine: null, newLine: j, content: newLines[j - 1] });
+      ops.unshift({ type: 'added', oldIdx: null, newIdx: j, content: newLines[j - 1] });
       j--;
     } else {
-      diff.unshift({ type: 'removed', oldLine: i, newLine: null, content: oldLines[i - 1] });
+      ops.unshift({ type: 'removed', oldIdx: i, newIdx: null, content: oldLines[i - 1] });
       i--;
+    }
+  }
+
+  // Build diff with interleaved removed/added pairs
+  // Group consecutive non-unchanged ops and output: all removed first, then all added
+  const diff = [];
+  let opIdx = 0;
+
+  while (opIdx < ops.length) {
+    const op = ops[opIdx];
+
+    if (op.type === 'unchanged') {
+      diff.push({ type: 'unchanged', oldLine: op.oldIdx, newLine: op.newIdx, content: op.content });
+      opIdx++;
+    } else {
+      // Collect consecutive removed and added operations
+      const removed = [];
+      const added = [];
+
+      while (opIdx < ops.length && ops[opIdx].type !== 'unchanged') {
+        if (ops[opIdx].type === 'removed') {
+          removed.push(ops[opIdx]);
+        } else {
+          added.push(ops[opIdx]);
+        }
+        opIdx++;
+      }
+
+      // Interleave: pair up removed[i] with added[i], output remaining
+      const maxPairs = Math.max(removed.length, added.length);
+      for (let k = 0; k < maxPairs; k++) {
+        if (k < removed.length) {
+          diff.push({ type: 'removed', oldLine: removed[k].oldIdx, newLine: null, content: removed[k].content });
+        }
+        if (k < added.length) {
+          diff.push({ type: 'added', oldLine: null, newLine: added[k].newIdx, content: added[k].content });
+        }
+      }
     }
   }
 
