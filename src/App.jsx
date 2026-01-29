@@ -42,83 +42,68 @@ const getFileSlug = (path) => {
 };
 
 /**
- * Word-level diffing logic using LCS (Longest Common Subsequence).
- * This properly identifies which words are equal vs changed.
+ * Shared LCS (Longest Common Subsequence) table builder.
+ * Returns the DP table for backtracking.
+ */
+const buildLCSTable = (oldArr, newArr) => {
+  const m = oldArr.length;
+  const n = newArr.length;
+  const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = oldArr[i - 1] === newArr[j - 1]
+        ? dp[i - 1][j - 1] + 1
+        : Math.max(dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  return dp;
+};
+
+/**
+ * Shared LCS backtracking to produce diff operations.
+ * @param {Function} makeOp - Factory: (type, oldIdx, newIdx, content) => operation object
+ */
+const backtrackLCS = (dp, oldArr, newArr, makeOp) => {
+  const result = [];
+  let i = oldArr.length, j = newArr.length;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oldArr[i - 1] === newArr[j - 1]) {
+      result.unshift(makeOp('equal', i, j, oldArr[i - 1]));
+      i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      result.unshift(makeOp('added', null, j, newArr[j - 1]));
+      j--;
+    } else {
+      result.unshift(makeOp('removed', i, null, oldArr[i - 1]));
+      i--;
+    }
+  }
+  return result;
+};
+
+/**
+ * Word-level diffing logic using LCS.
  */
 const getWordDiff = (oldStr, newStr) => {
   const tokenize = (s) => s.split(/(\s+|\b)/).filter(Boolean);
   const oldTokens = tokenize(oldStr);
   const newTokens = tokenize(newStr);
-
-  // Build LCS table
-  const m = oldTokens.length;
-  const n = newTokens.length;
-  const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
-
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      if (oldTokens[i - 1] === newTokens[j - 1]) {
-        dp[i][j] = dp[i - 1][j - 1] + 1;
-      } else {
-        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
-      }
-    }
-  }
-
-  // Backtrack to build the diff
-  const result = [];
-  let i = m, j = n;
-
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && oldTokens[i - 1] === newTokens[j - 1]) {
-      result.unshift({ value: oldTokens[i - 1], type: 'equal' });
-      i--; j--;
-    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      result.unshift({ value: newTokens[j - 1], type: 'added' });
-      j--;
-    } else {
-      result.unshift({ value: oldTokens[i - 1], type: 'removed' });
-      i--;
-    }
-  }
-
-  return result;
+  const dp = buildLCSTable(oldTokens, newTokens);
+  return backtrackLCS(dp, oldTokens, newTokens, (type, _oi, _ni, value) => ({ value, type }));
 };
 
 const calculateDiff = (oldText, newText) => {
   const oldLines = (oldText || '').split('\n');
   const newLines = (newText || '').split('\n');
-  const m = oldLines.length;
-  const n = newLines.length;
+  const dp = buildLCSTable(oldLines, newLines);
 
-  // Build LCS table
-  const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      if (oldLines[i - 1] === newLines[j - 1]) {
-        dp[i][j] = dp[i - 1][j - 1] + 1;
-      } else {
-        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
-      }
-    }
-  }
-
-  // Backtrack to collect operations, then interleave properly
-  const ops = [];
-  let i = m, j = n;
-
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
-      ops.unshift({ type: 'unchanged', oldIdx: i, newIdx: j, content: oldLines[i - 1] });
-      i--; j--;
-    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      ops.unshift({ type: 'added', oldIdx: null, newIdx: j, content: newLines[j - 1] });
-      j--;
-    } else {
-      ops.unshift({ type: 'removed', oldIdx: i, newIdx: null, content: oldLines[i - 1] });
-      i--;
-    }
-  }
+  // Backtrack using shared helper
+  const ops = backtrackLCS(dp, oldLines, newLines, (type, oldIdx, newIdx, content) => ({
+    type: type === 'equal' ? 'unchanged' : type,
+    oldIdx,
+    newIdx,
+    content
+  }));
 
   // Build diff with interleaved removed/added pairs
   // Group consecutive non-unchanged ops and output: all removed first, then all added
@@ -361,7 +346,11 @@ const ComparisonView = ({ pair, toggleSidebar, isSidebarCollapsed }) => {
   const scrollContainerRef = useRef(null);
   const diff = useMemo(() => calculateDiff(pair.v1?.content, pair.v2?.content), [pair]);
   const chunks = useMemo(() => chunkifyDiff(diff), [diff]);
-  const stats = useMemo(() => ({ added: diff.filter(d => d.type === 'added').length, removed: diff.filter(d => d.type === 'removed').length }), [diff]);
+  const stats = useMemo(() => diff.reduce((acc, d) => {
+    if (d.type === 'added') acc.added++;
+    else if (d.type === 'removed') acc.removed++;
+    return acc;
+  }, { added: 0, removed: 0 }), [diff]);
   const [copied, setCopied] = useState(false);
 
   const copyToClipboard = () => {
@@ -481,38 +470,36 @@ export default function App() {
 
   const matchedPairs = useMemo(() => {
     if (v1Files.length === 0 && v2Files.length === 0) return [];
-    const v1Map = new Map();
-    const v2Map = new Map();
-    v1Files.forEach(f => {
+
+    // Helper to build slug -> files map
+    const buildFileMap = (files) => files.reduce((map, f) => {
       const slug = getFileSlug(f.path);
-      if (!v1Map.has(slug)) v1Map.set(slug, []);
-      v1Map.get(slug).push(f);
-    });
-    v2Files.forEach(f => {
-      const slug = getFileSlug(f.path);
-      if (!v2Map.has(slug)) v2Map.set(slug, []);
-      v2Map.get(slug).push(f);
-    });
+      if (!map.has(slug)) map.set(slug, []);
+      map.get(slug).push(f);
+      return map;
+    }, new Map());
+
+    const v1Map = buildFileMap(v1Files);
+    const v2Map = buildFileMap(v2Files);
     const allSlugs = new Set([...v1Map.keys(), ...v2Map.keys()]);
-    const pairs = Array.from(allSlugs).map(slug => {
+
+    return Array.from(allSlugs).map(slug => {
       const v1Matches = v1Map.get(slug) || [];
       const v2Matches = v2Map.get(slug) || [];
       if (v1Matches.length > 0 && v2Matches.length > 0) return { type: 'modified', slug, v1: v1Matches[0], v2: v2Matches[0] };
       if (v1Matches.length > 0) return { type: 'deleted', slug, v1: v1Matches[0], v2: null };
       return { type: 'added', slug, v1: null, v2: v2Matches[0] };
-    });
-    return pairs.sort((a, b) => a.slug.localeCompare(b.slug));
+    }).sort((a, b) => a.slug.localeCompare(b.slug));
   }, [v1Files, v2Files]);
 
   useEffect(() => {
     if (matchedPairs.length > 0 && !selectedPair) setSelectedPair(matchedPairs[0]);
   }, [matchedPairs, selectedPair]);
 
-  const stats = {
-    modified: matchedPairs.filter(p => p.type === 'modified').length,
-    added: matchedPairs.filter(p => p.type === 'added').length,
-    deleted: matchedPairs.filter(p => p.type === 'deleted').length,
-  };
+  const stats = matchedPairs.reduce((acc, p) => {
+    acc[p.type] = (acc[p.type] || 0) + 1;
+    return acc;
+  }, { modified: 0, added: 0, deleted: 0 });
 
   return (
     <div className="flex h-screen bg-[#010409] text-slate-300 font-sans antialiased overflow-hidden relative">
