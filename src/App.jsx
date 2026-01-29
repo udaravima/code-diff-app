@@ -42,47 +42,81 @@ const getFileSlug = (path) => {
 };
 
 /**
- * Word-level diffing logic.
+ * Word-level diffing logic using LCS (Longest Common Subsequence).
+ * This properly identifies which words are equal vs changed.
  */
 const getWordDiff = (oldStr, newStr) => {
-  const tokenize = (s) => s.split(/(\W+)/).filter(Boolean);
-  const oldWords = tokenize(oldStr);
-  const newWords = tokenize(newStr);
+  const tokenize = (s) => s.split(/(\s+|\b)/).filter(Boolean);
+  const oldTokens = tokenize(oldStr);
+  const newTokens = tokenize(newStr);
 
-  const result = [];
-  let i = 0, j = 0;
+  // Build LCS table
+  const m = oldTokens.length;
+  const n = newTokens.length;
+  const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
 
-  while (i < oldWords.length || j < newWords.length) {
-    if (i < oldWords.length && j < newWords.length && oldWords[i] === newWords[j]) {
-      result.push({ value: oldWords[i], type: 'equal' });
-      i++; j++;
-    } else if (j < newWords.length && (i >= oldWords.length || !oldWords.slice(i, i + 10).includes(newWords[j]))) {
-      result.push({ value: newWords[j], type: 'added' });
-      j++;
-    } else {
-      result.push({ value: oldWords[i], type: 'removed' });
-      i++;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (oldTokens[i - 1] === newTokens[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
     }
   }
+
+  // Backtrack to build the diff
+  const result = [];
+  let i = m, j = n;
+
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oldTokens[i - 1] === newTokens[j - 1]) {
+      result.unshift({ value: oldTokens[i - 1], type: 'equal' });
+      i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      result.unshift({ value: newTokens[j - 1], type: 'added' });
+      j--;
+    } else {
+      result.unshift({ value: oldTokens[i - 1], type: 'removed' });
+      i--;
+    }
+  }
+
   return result;
 };
 
 const calculateDiff = (oldText, newText) => {
   const oldLines = (oldText || '').split('\n');
   const newLines = (newText || '').split('\n');
-  const diff = [];
+  const m = oldLines.length;
+  const n = newLines.length;
 
-  let i = 0, j = 0;
-  while (i < oldLines.length || j < newLines.length) {
-    if (i < oldLines.length && j < newLines.length && oldLines[i] === newLines[j]) {
-      diff.push({ type: 'unchanged', oldLine: i + 1, newLine: j + 1, content: oldLines[i] });
-      i++; j++;
-    } else if (j < newLines.length && (i >= oldLines.length || !oldLines.slice(i, i + 15).includes(newLines[j]))) {
-      diff.push({ type: 'added', oldLine: null, newLine: j + 1, content: newLines[j] });
-      j++;
+  // Build LCS table
+  const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (oldLines[i - 1] === newLines[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+  }
+
+  // Backtrack to build diff - output removed/added pairs adjacently
+  const diff = [];
+  let i = m, j = n;
+
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
+      diff.unshift({ type: 'unchanged', oldLine: i, newLine: j, content: oldLines[i - 1] });
+      i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      diff.unshift({ type: 'added', oldLine: null, newLine: j, content: newLines[j - 1] });
+      j--;
     } else {
-      diff.push({ type: 'removed', oldLine: i + 1, newLine: null, content: oldLines[i] });
-      i++;
+      diff.unshift({ type: 'removed', oldLine: i, newLine: null, content: oldLines[i - 1] });
+      i--;
     }
   }
 
@@ -173,21 +207,25 @@ const DiffLine = React.memo(({ line }) => {
       return line.segments.map((segment, idx) => {
         if (segment.type === 'equal') return <span key={idx}>{segment.value}</span>;
 
-        // Only highlight if segment type matches line type (added on added line, removed on removed line)
-        if (segment.type === line.type) {
-          return (
-            <span
-              key={idx}
-              className={line.type === 'added'
-                ? 'bg-emerald-400/30 text-emerald-100 font-bold rounded-sm'
-                : 'bg-rose-400/30 text-rose-100 font-bold rounded-sm'
-              }
-            >
-              {segment.value}
-            </span>
-          );
+        // Skip segments meant for the opposite line type
+        // On 'added' line: skip 'removed' segments (they show on the removed line)
+        // On 'removed' line: skip 'added' segments (they show on the added line)
+        if (segment.type !== line.type) {
+          return null;
         }
-        return null;
+
+        // Highlight the changed segment
+        return (
+          <span
+            key={idx}
+            className={line.type === 'added'
+              ? 'bg-emerald-400/30 text-emerald-100 font-bold rounded-sm'
+              : 'bg-rose-400/30 text-rose-100 font-bold rounded-sm'
+            }
+          >
+            {segment.value}
+          </span>
+        );
       });
     }
 
